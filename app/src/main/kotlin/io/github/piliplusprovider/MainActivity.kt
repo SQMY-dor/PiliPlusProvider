@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -85,7 +86,15 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
     override fun onStart() {
         super.onStart()
         App.addServiceStateListener(this, true)
-        registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        // Android 13+ 动态注册广播必须指定 RECEIVER_EXPORTED / RECEIVER_NOT_EXPORTED，
+        // 否则抛 SecurityException 导致闪退。DownloadManager 广播来自系统进程，NOT_EXPORTED 可正常接收。
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(downloadReceiver, filter)
+        }
     }
 
     override fun onStop() {
