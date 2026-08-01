@@ -38,8 +38,7 @@ object PiliPlusHook {
     fun install(module: XposedModule, param: PackageReadyParam) {
         module.log(Log.DEBUG, TAG, "Hooking PiliPlus: ${param.packageName}")
 
-        val prefs = module.getRemotePreferences(Constants.PREFS_NAME)
-        val manager = VideoInfoProviderManager(module, prefs)
+        val manager = VideoInfoProviderManager(module)
 
         // 宿主 Application.onCreate 之后注册 LyriconProvider（与原 onAppLifecycle.onCreate 行为一致），
         // chain.thisObject 即为宿主 Application 实例
@@ -59,16 +58,38 @@ object PiliPlusHook {
     }
 
     /**
+     * 热重载后重新安装 Hook（由 HookEntry.onHotReloaded 调用）
+     *
+     * 热重载不会重放 onPackageReady，且此时宿主进程已在运行（Application 已创建），
+     * 因此这里不再 hook Application.onCreate，而是：
+     * 1. 重新 hook MediaSession（framework 类，boot classloader 可直接解析，classLoader 传 null）
+     * 2. 通过 ActivityThread 反射获取宿主 Application，直接注册 LyriconProvider
+     */
+    fun reinstall(module: XposedModule) {
+        module.log(Log.DEBUG, TAG, "Reinstalling hooks after hot reload")
+        val manager = VideoInfoProviderManager(module)
+        manager.hookMediaSession(null)
+        manager.ensureProvider()
+    }
+
+    /**
      * 视频信息提供者管理器
      * 负责 Hook MediaSession、管理 Lyricon Provider 生命周期、按设置推送内容
+     *
+     * 注意：RemotePreferences 实例是获取时的快照，UI 侧修改设置后旧实例不会刷新，
+     * 因此每次读取设置都通过 [prefs] 重新获取，确保「推送时长」「显示已播放时间」
+     * 等开关即时生效。
      */
     private class VideoInfoProviderManager(
         private val module: XposedModule,
-        private val prefs: SharedPreferences,
     ) {
+        /** 每次调用都从框架拉取最新设置（RemotePreferences 快照问题） */
+        private fun prefs(): SharedPreferences = module.getRemotePreferences(Constants.PREFS_NAME)
+
         private var lyricProvider: LyriconProvider? = null
         private var lastSong: Song? = null
         private var currentVideoId: String = ""
+        private var lastContentSignature: String = ""
         private var currentDuration: Long = 0L
 
         /** 最近一次 PlaybackState，用于推算实时播放进度 */
@@ -110,7 +131,7 @@ object PiliPlusHook {
          * 兜底：若宿主在 Application.onCreate hook 前就开始播放，
          * 通过 ActivityThread 反射获取 Application 以注册 Provider
          */
-        private fun ensureProvider() {
+        fun ensureProvider() {
             if (lyricProvider != null) return
             currentApplication()?.let { setupProvider(it) }
         }
@@ -137,8 +158,9 @@ object PiliPlusHook {
          * - MediaMetadata.METADATA_KEY_MEDIA_ID = 唯一标识 (cid + herotag)
          * - MediaMetadata.METADATA_KEY_ART_URI = 视频封面
          */
-        fun hookMediaSession(classLoader: ClassLoader) {
+        fun hookMediaSession(classLoader: ClassLoader?) {
             try {
+                // MediaSession 是 framework 类，classLoader 传 null 时用 boot classloader 也可解析
                 val sessionClass = Class.forName("android.media.session.MediaSession", false, classLoader)
 
                 // Hook setMetadata - 获取视频标题和UP主
@@ -172,6 +194,10 @@ object PiliPlusHook {
         /**
          * 处理 MediaMetadata 变更
          * 提取视频标题、UP主名字、时长等信息，按设置组装后推送
+         *
+         * 去重使用「mediaId + title + artist + duration」内容签名：
+         * 即使 mediaId 相同，只要 UP主/标题/时长任一变化也会重新推送，
+         * 避免 UP主信息与实际上屏不同步。
          */
         private fun onMetadataChanged(metadata: MediaMetadata) {
             val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return
@@ -180,10 +206,12 @@ object PiliPlusHook {
             val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID) ?: ""
             val artUri = metadata.getString(MediaMetadata.METADATA_KEY_ART_URI) ?: ""
 
-            // 避免重复设置相同视频
+            // 避免重复设置相同内容：mediaId 与内容签名都相同才跳过
             val videoId = mediaId.ifEmpty { "$title-$artist" }
-            if (currentVideoId == videoId) return
+            val contentSignature = "$videoId|$title|$artist|$duration"
+            if (currentVideoId == videoId && lastContentSignature == contentSignature) return
             currentVideoId = videoId
+            lastContentSignature = contentSignature
             currentDuration = duration
 
             module.log(
@@ -194,7 +222,7 @@ object PiliPlusHook {
             setSong(buildSong(title = title, artist = artist, duration = duration, videoId = videoId))
 
             // 新视频从头开始：开启「显示已播放时间」时立即同步位置为 0
-            if (prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)) {
+            if (prefs().getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)) {
                 lyricProvider?.player?.setPosition(0L)
             }
         }
@@ -206,9 +234,9 @@ object PiliPlusHook {
          * - push_duration=false → duration 置 0
          */
         private fun buildSong(title: String, artist: String, duration: Long, videoId: String): Song {
-            val pushTitle = prefs.getBoolean(Constants.KEY_PUSH_TITLE, true)
-            val pushArtist = prefs.getBoolean(Constants.KEY_PUSH_ARTIST, true)
-            val pushDuration = prefs.getBoolean(Constants.KEY_PUSH_DURATION, true)
+            val pushTitle = prefs().getBoolean(Constants.KEY_PUSH_TITLE, true)
+            val pushArtist = prefs().getBoolean(Constants.KEY_PUSH_ARTIST, true)
+            val pushDuration = prefs().getBoolean(Constants.KEY_PUSH_DURATION, true)
             return Song(
                 id = videoId,
                 name = if (pushTitle) title else null,
@@ -231,7 +259,7 @@ object PiliPlusHook {
          * 仅当「显示已播放时间」开启且处于播放中时运行
          */
         private fun updateElapsedTracking() {
-            val showElapsed = prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)
+            val showElapsed = prefs().getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)
             val isPlaying = lastPlaybackState?.state == PlaybackState.STATE_PLAYING
             val shouldTrack = showElapsed && isPlaying
             if (shouldTrack && !isTrackingElapsed) {
@@ -250,7 +278,7 @@ object PiliPlusHook {
          * 仅 STATE_PLAYING 时随时间推进，暂停/停止时固定为 position
          */
         private fun syncElapsedTime() {
-            if (!prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)) return
+            if (!prefs().getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)) return
             val state = lastPlaybackState ?: return
             val positionMs = calculateCurrentPosition(state)
             lyricProvider?.player?.setPosition(positionMs)

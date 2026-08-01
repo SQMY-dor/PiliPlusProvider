@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.libxposed.service.HotReloadResult
+import io.github.libxposed.service.HookedTarget
 import io.github.libxposed.service.XposedService
 import io.github.piliplusprovider.xposed.Constants
 import kotlinx.coroutines.launch
@@ -78,6 +80,7 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
                 SettingsScreen(
                     service = service,
                     onStartDownload = ::startUpdateDownload,
+                    onHotReload = ::hotReloadPiliPlus,
                 )
             }
         }
@@ -119,6 +122,40 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
         }
     }
 
+    /** 热重启 PiliPlus（通过 XposedService.hotReloadModule 触发热重载） */
+    private fun hotReloadPiliPlus() {
+        val svc = service
+        if (svc == null) {
+            Toast.makeText(this, "未连接到框架服务，无法热重启", Toast.LENGTH_LONG).show()
+            return
+        }
+        val targets = svc.runningTargets.filter { it.processName in Constants.TARGET_PACKAGES }
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "PiliPlus 未在运行，无需热重启", Toast.LENGTH_LONG).show()
+            return
+        }
+        var pending = targets.size
+        var succeeded = 0
+        var failed = 0
+        for (target in targets) {
+            svc.hotReloadModule(target, null) { _: HookedTarget, result: HotReloadResult ->
+                runOnUiThread {
+                    if (result.status == HotReloadResult.Status.SUCCEEDED) succeeded++ else failed++
+                    pending--
+                    if (pending == 0) {
+                        val msg = if (failed == 0) {
+                            "热重启成功（$succeeded 个进程）"
+                        } else {
+                            "热重启完成：成功 $succeeded，失败 $failed"
+                        }
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        Toast.makeText(this, "正在热重启 PiliPlus…", Toast.LENGTH_SHORT).show()
+    }
+
     /** 下载完成后拉起系统安装器 */
     private fun installDownloadedApk(context: Context, downloadId: Long) {
         try {
@@ -155,6 +192,7 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
 private fun SettingsScreen(
     service: XposedService?,
     onStartDownload: (url: String, version: String) -> Unit,
+    onHotReload: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -301,6 +339,21 @@ private fun SettingsScreen(
                     ) {
                         BasicText(
                             text = if (checkingUpdate) "正在检查更新…" else "检查更新（当前 v${BuildConfig.VERSION_NAME}）",
+                        )
+                    }
+                }
+            }
+            item {
+                Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onHotReload() }
+                            .padding(16.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        BasicText(
+                            text = if (service == null) "热重启 PiliPlus（未连接框架）" else "热重启 PiliPlus",
                         )
                     }
                 }
