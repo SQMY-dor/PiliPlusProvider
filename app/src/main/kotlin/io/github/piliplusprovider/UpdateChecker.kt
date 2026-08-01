@@ -1,8 +1,10 @@
 package io.github.piliplusprovider
 
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,10 +13,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 版本更新检查
+ * 版本更新检查与下载
  *
- * 通过 GitHub Releases API 获取最新版本，与本地 BuildConfig.VERSION_NAME 比较，
- * 有新版时提示用户下载。
+ * - 通过 GitHub Releases API 获取最新版本，与本地 BuildConfig.VERSION_NAME 比较
+ * - 有新版时提供 APK 下载（系统 DownloadManager 后台下载，完成后通知栏可见）
  */
 object UpdateChecker {
 
@@ -33,6 +35,7 @@ object UpdateChecker {
         val latestVersion: String,       // 例如 1.2.0
         val tagName: String,             // 例如 v1.2.0
         val releaseUrl: String,          // 发布页 URL
+        val apkUrl: String,              // APK 直链（优先 release 版）
         val body: String,                // 更新说明
         val publishedAt: String,         // 发布时间
     )
@@ -70,6 +73,7 @@ object UpdateChecker {
                     latestVersion = latestVersion,
                     tagName = tagName,
                     releaseUrl = json.optString("html_url", REPO_URL),
+                    apkUrl = findApkUrl(json),
                     body = json.optString("body", ""),
                     publishedAt = json.optString("published_at", ""),
                 )
@@ -80,6 +84,25 @@ object UpdateChecker {
             Log.w(TAG, "Update check failed: ${e.message}")
             null
         }
+    }
+
+    /**
+     * 从 Release 的 assets 中挑选 APK 直链：
+     * 优先找 release 版（名称含 "-release.apk"），没有则回退任意 .apk
+     */
+    private fun findApkUrl(json: JSONObject): String {
+        val assets = json.optJSONArray("assets") ?: return REPO_URL
+        var fallback = ""
+        for (i in 0 until assets.length()) {
+            val asset = assets.optJSONObject(i) ?: continue
+            val name = asset.optString("name", "")
+            if (!name.endsWith(".apk")) continue
+            val url = asset.optString("browser_download_url", "")
+            if (url.isBlank()) continue
+            if (name.contains("-release.apk") || name.contains("release")) return url
+            if (fallback.isBlank()) fallback = url
+        }
+        return fallback.ifBlank { REPO_URL }
     }
 
     /**
@@ -104,7 +127,31 @@ object UpdateChecker {
         return parts.mapNotNull { it.toIntOrNull() }.takeIf { it.isNotEmpty() && it.size == parts.size }
     }
 
-    /** 打开浏览器跳转 Release 页 */
+    /**
+     * 使用系统 DownloadManager 后台下载 APK 到公共 Downloads 目录
+     *
+     * @return 下载任务 ID（用于监听 DownloadManager.ACTION_DOWNLOAD_COMPLETE），失败返回 -1
+     */
+    fun startDownload(context: Context, url: String, version: String): Long {
+        return try {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val fileName = "PiliPlusProvider-v$version.apk"
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle("PiliPlusProvider v$version")
+                setDescription("正在后台下载更新包…")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                setMimeType("application/vnd.android.package-archive")
+                setAllowedOverMetered(true)
+            }
+            dm.enqueue(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "startDownload failed: ${e.message}")
+            -1L
+        }
+    }
+
+    /** 打开浏览器跳转 Release 页（兜底） */
     fun openReleasePage(context: Context, url: String = REPO_URL) {
         try {
             context.startActivity(

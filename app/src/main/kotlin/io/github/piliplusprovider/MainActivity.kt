@@ -1,6 +1,12 @@
 package io.github.piliplusprovider
 
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -50,11 +56,28 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
 
     private var service by mutableStateOf<XposedService?>(null)
 
+    /** 当前进行中的更新下载任务 ID（用于匹配下载完成广播） */
+    private var pendingDownloadId = -1L
+
+    /** 更新包下载完成广播：拉起安装器 */
+    private val downloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (id != pendingDownloadId) return
+            pendingDownloadId = -1L
+            installDownloadedApk(context, id)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MiuixTheme {
-                SettingsScreen(service = service)
+                SettingsScreen(
+                    service = service,
+                    onStartDownload = ::startUpdateDownload,
+                )
             }
         }
     }
@@ -62,9 +85,11 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
     override fun onStart() {
         super.onStart()
         App.addServiceStateListener(this, true)
+        registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
     }
 
     override fun onStop() {
+        runCatching { unregisterReceiver(downloadReceiver) }
         App.removeServiceStateListener(this)
         super.onStop()
     }
@@ -72,10 +97,56 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
     override fun onServiceStateChanged(service: XposedService?) {
         this.service = service
     }
+
+    /** 后台下载更新包，完成后自动拉起安装器 */
+    private fun startUpdateDownload(url: String, version: String) {
+        val id = UpdateChecker.startDownload(this, url, version)
+        if (id != -1L) {
+            pendingDownloadId = id
+            Toast.makeText(this, "开始后台下载更新…", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "下载启动失败，请手动前往 Releases 下载", Toast.LENGTH_LONG).show()
+            UpdateChecker.openReleasePage(this)
+        }
+    }
+
+    /** 下载完成后拉起系统安装器 */
+    private fun installDownloadedApk(context: Context, downloadId: Long) {
+        try {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = dm.query(query)
+            cursor.use {
+                if (!it.moveToFirst()) return
+                val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                    Toast.makeText(context, "更新包下载失败（状态 $status）", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+            val uri: Uri? = dm.getUriForDownloadedFile(downloadId)
+            if (uri == null) {
+                Toast.makeText(context, "更新包文件不存在", Toast.LENGTH_LONG).show()
+                return
+            }
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(installIntent)
+            Toast.makeText(context, "下载完成，正在拉起安装…", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "拉起安装失败：${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 }
 
 @Composable
-private fun SettingsScreen(service: XposedService?) {
+private fun SettingsScreen(
+    service: XposedService?,
+    onStartDownload: (url: String, version: String) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checkingUpdate by remember { mutableStateOf(false) }
@@ -130,7 +201,7 @@ private fun SettingsScreen(service: XposedService?) {
                         text = "去更新",
                         onClick = {
                             updateInfo = null
-                            UpdateChecker.openReleasePage(context, info.releaseUrl)
+                            onStartDownload(info.apkUrl, info.latestVersion)
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColorsPrimary(),

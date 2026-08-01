@@ -4,6 +4,11 @@
     <!-- 版本更新检查：访问 GitHub Releases API -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 更新下载完成后拉起安装器 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:name=".App"
         android:allowBackup="true"
