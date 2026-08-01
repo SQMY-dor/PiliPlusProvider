@@ -1,15 +1,19 @@
 package io.github.piliplusprovider
 
-import android.app.AlertDialog
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -25,10 +29,13 @@ import androidx.compose.ui.unit.dp
 import io.github.libxposed.service.XposedService
 import io.github.piliplusprovider.xposed.Constants
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.extra.SuperDialog
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -72,6 +79,7 @@ private fun SettingsScreen(service: XposedService?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checkingUpdate by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
     val prefs = remember(service) {
         runCatching { service?.getRemotePreferences(Constants.PREFS_NAME) }.getOrNull()
     }
@@ -88,27 +96,48 @@ private fun SettingsScreen(service: XposedService?) {
         }
     }
 
-    /** 检查更新：显示结果对话框 */
+    /** 检查更新：无更新 Toast 提示，有更新弹 Miuix SuperDialog */
     fun onCheckUpdate() {
         if (checkingUpdate) return
         checkingUpdate = true
         scope.launch {
             val update = UpdateChecker.checkForUpdate()
             checkingUpdate = false
-            val dialog = if (update == null) {
-                AlertDialog.Builder(context)
-                    .setTitle("检查更新")
-                    .setMessage("当前已是最新版本（v${BuildConfig.VERSION_NAME}）")
-                    .setPositiveButton("确定", null)
+            if (update == null) {
+                Toast.makeText(context, "当前已是最新版本（v${BuildConfig.VERSION_NAME}）", Toast.LENGTH_SHORT).show()
             } else {
-                AlertDialog.Builder(context)
-                    .setTitle("发现新版本 v${update.latestVersion}")
-                    .setMessage(update.body.ifBlank { "请前往 GitHub Releases 下载更新" }.take(2000))
-                    .setPositiveButton("去下载") { _, _ -> UpdateChecker.openReleasePage(context, update.releaseUrl) }
-                    .setNegativeButton("取消", null)
+                updateInfo = update
             }
-            runCatching { dialog.show() }
         }
+    }
+
+    // 有更新时显示 Miuix 风格对话框
+    updateInfo?.let { info ->
+        SuperDialog(
+            show = true,
+            title = "发现新版本 v${info.latestVersion}",
+            summary = info.body.ifBlank { "请前往 GitHub Releases 下载更新" }.take(500),
+            onDismissRequest = { updateInfo = null },
+            content = {
+                Row(horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(
+                        text = "取消",
+                        onClick = { updateInfo = null },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(20.dp))
+                    TextButton(
+                        text = "去更新",
+                        onClick = {
+                            updateInfo = null
+                            UpdateChecker.openReleasePage(context, info.releaseUrl)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
+            },
+        )
     }
 
     Scaffold(
