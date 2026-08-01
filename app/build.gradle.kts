@@ -3,6 +3,16 @@ plugins {
     alias(libs.plugins.compose)
 }
 
+import java.util.Properties
+
+// ===== 版本号：从 version.properties 读取（发布用 bumpVersion 任务递增） =====
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+    if (versionPropsFile.exists()) versionPropsFile.inputStream().use { load(it) }
+}
+val appVersionCode: Int = (versionProps.getProperty("versionCode") ?: "1").toInt()
+val appVersionName: String = versionProps.getProperty("versionName") ?: "1.0.0"
+
 android {
     namespace = "io.github.piliplusprovider"
     compileSdk = 37
@@ -11,8 +21,8 @@ android {
         applicationId = "io.github.piliplusprovider"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     buildTypes {
@@ -68,6 +78,7 @@ dependencies {
     implementation(libs.libxposed.service)
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.android)
 
     // Compose + Miuix (HyperOS 风格设置界面)
     implementation(platform(libs.androidx.compose.bom))

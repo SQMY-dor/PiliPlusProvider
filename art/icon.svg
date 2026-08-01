@@ -1,0 +1,31 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FB7299"/>
+      <stop offset="1" stop-color="#E8547E"/>
+    </linearGradient>
+    <linearGradient id="tv" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F5E6EC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆角方块（B站粉渐变） -->
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bg)"/>
+
+  <!-- 顶部小圆点（电视天线装饰） -->
+  <circle cx="512" cy="212" r="36" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- 电视屏幕主体（白色圆角矩形） -->
+  <rect x="192" y="280" width="640" height="480" rx="72" fill="url(#tv)"/>
+
+  <!-- 屏幕内播放三角（粉） -->
+  <path d="M448 392 L672 520 L448 648 Z" fill="#FB7299"/>
+
+  <!-- 电视底座横条 -->
+  <rect x="392" y="800" width="240" height="52" rx="26" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- 底座两脚 -->
+  <rect x="392" y="852" width="52" height="72" rx="26" fill="#FFFFFF" opacity="0.9"/>
+  <rect x="580" y="852" width="52" height="72" rx="26" fill="#FFFFFF" opacity="0.9"/>
+</svg>

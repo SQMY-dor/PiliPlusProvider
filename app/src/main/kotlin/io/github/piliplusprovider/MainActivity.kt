@@ -1,21 +1,30 @@
 package io.github.piliplusprovider
 
+import android.app.AlertDialog
 import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.libxposed.service.XposedService
 import io.github.piliplusprovider.xposed.Constants
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -60,6 +69,9 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
 
 @Composable
 private fun SettingsScreen(service: XposedService?) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checkingUpdate by remember { mutableStateOf(false) }
     val prefs = remember(service) {
         runCatching { service?.getRemotePreferences(Constants.PREFS_NAME) }.getOrNull()
     }
@@ -73,6 +85,29 @@ private fun SettingsScreen(service: XposedService?) {
     fun writeBoolean(key: String, value: Boolean) {
         runCatching {
             prefs?.edit()?.putBoolean(key, value)?.apply()
+        }
+    }
+
+    /** 检查更新：显示结果对话框 */
+    fun onCheckUpdate() {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        scope.launch {
+            val update = UpdateChecker.checkForUpdate()
+            checkingUpdate = false
+            val dialog = if (update == null) {
+                AlertDialog.Builder(context)
+                    .setTitle("检查更新")
+                    .setMessage("当前已是最新版本（v${BuildConfig.VERSION_NAME}）")
+                    .setPositiveButton("确定", null)
+            } else {
+                AlertDialog.Builder(context)
+                    .setTitle("发现新版本 v${update.latestVersion}")
+                    .setMessage(update.body.ifBlank { "请前往 GitHub Releases 下载更新" }.take(2000))
+                    .setPositiveButton("去下载") { _, _ -> UpdateChecker.openReleasePage(context, update.releaseUrl) }
+                    .setNegativeButton("取消", null)
+            }
+            runCatching { dialog.show() }
         }
     }
 
@@ -138,6 +173,27 @@ private fun SettingsScreen(service: XposedService?) {
                             writeBoolean(Constants.KEY_SHOW_ELAPSED_TIME, it)
                         }
                     )
+                }
+            }
+            item {
+                SmallTitle(
+                    text = "关于",
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+            item {
+                Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onCheckUpdate() }
+                            .padding(16.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        BasicText(
+                            text = if (checkingUpdate) "正在检查更新…" else "检查更新（当前 v${BuildConfig.VERSION_NAME}）",
+                        )
+                    }
                 }
             }
         }
