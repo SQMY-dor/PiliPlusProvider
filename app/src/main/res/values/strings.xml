@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PiliPlus Provider</string>
-    <string name="xposed_description">为 PiliPlus 提供视频信息（标题、UP主）给外部软件</string>
     <string name="lyricon_module_description">从 PiliPlus 获取当前播放视频的标题和UP主名字，提供给词幕等外部显示软件</string>
 </resources>

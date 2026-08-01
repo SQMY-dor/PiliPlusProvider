@@ -1,21 +1,22 @@
 package io.github.piliplusprovider.xposed
 
+import android.app.Application
+import android.content.SharedPreferences
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
-import com.highcapable.yukihookapi.hook.log.YLog
-import com.highcapable.yukihookapi.hook.xposed.prefs.YukiHookPrefsBridge
+import android.util.Log
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.provider.ProviderLogo
 
 /**
- * PiliPlus Hook 主入口
+ * PiliPlus Hook 主逻辑（libxposed 现代 API 版）
  *
  * 通过 Hook MediaSession.setMetadata 获取 PiliPlus 当前播放视频的：
  * - 视频标题 (title)
@@ -23,33 +24,48 @@ import io.github.proify.lyricon.provider.ProviderLogo
  * - 视频时长 (duration)
  *
  * 并通过 Lyricon Provider 接口向外部软件（如词幕等）提供这些信息。
- * 推送内容与是否同步播放位置由模块设置（SharedPreferences）控制。
+ * 推送内容与是否同步播放位置由模块设置（RemotePreferences "settings"）控制。
  */
-object PiliPlusHook : YukiBaseHooker() {
+object PiliPlusHook {
     private const val TAG = "PiliPlusProvider"
 
-    override fun onHook() {
-        YLog.debug(tag = TAG, msg = "Hooking PiliPlus: $packageName")
+    /**
+     * 安装 Hook（由 HookEntry.onPackageReady 调用，仅对目标包名生效）
+     *
+     * @param module libxposed 模块实例（提供 hook() / getRemotePreferences() / log()）
+     * @param param  onPackageReady 参数，param.classLoader 为宿主 classloader
+     */
+    fun install(module: XposedModule, param: PackageReadyParam) {
+        module.log(Log.DEBUG, TAG, "Hooking PiliPlus: ${param.packageName}")
 
-        // 读取模块设置（宿主进程内通过 XSharedPreferences 跨进程读取模块 SP，
-        // 默认文件名 ${modulePackageName}_preferences，与 Manifest xposedsharedprefs 一致）
-        // 注：YukiBaseHooker 继承自 PackageParam，prefs 为其成员属性
-        val providerManager = VideoInfoProviderManager(prefs)
+        val prefs = module.getRemotePreferences(Constants.PREFS_NAME)
+        val manager = VideoInfoProviderManager(module, prefs)
 
-        onAppLifecycle {
-            onCreate {
-                providerManager.setupProvider()
+        // 宿主 Application.onCreate 之后注册 LyriconProvider（与原 onAppLifecycle.onCreate 行为一致），
+        // chain.thisObject 即为宿主 Application 实例
+        try {
+            val appClass = Class.forName("android.app.Application", false, param.classLoader)
+            module.hook(appClass.getDeclaredMethod("onCreate")).intercept { chain ->
+                chain.proceed()
+                val app = chain.thisObject as? Application
+                if (app != null) manager.setupProvider(app)
+                null
             }
+        } catch (t: Throwable) {
+            module.log(Log.WARN, TAG, "Failed to hook Application.onCreate", t)
         }
 
-        providerManager.hookMediaSession()
+        manager.hookMediaSession(param.classLoader)
     }
 
     /**
      * 视频信息提供者管理器
      * 负责 Hook MediaSession、管理 Lyricon Provider 生命周期、按设置推送内容
      */
-    private class VideoInfoProviderManager(private val prefs: YukiHookPrefsBridge) {
+    private class VideoInfoProviderManager(
+        private val module: XposedModule,
+        private val prefs: SharedPreferences,
+    ) {
         private var lyricProvider: LyriconProvider? = null
         private var lastSong: Song? = null
         private var currentVideoId: String = ""
@@ -69,22 +85,45 @@ object PiliPlusHook : YukiBaseHooker() {
         }
 
         /**
-         * 初始化并注册 LyriconProvider
+         * 初始化并注册 LyriconProvider（宿主进程内）
          */
-        fun setupProvider() {
-            val application = appContext ?: return
-            lyricProvider?.destroy()
+        fun setupProvider(application: Application) {
+            try {
+                lyricProvider?.destroy()
 
-            lyricProvider = LyriconFactory.createProvider(
-                context = application,
-                providerPackageName = Constants.PROVIDER_PACKAGE_NAME,
-                playerPackageName = application.packageName,
-                logo = ProviderLogo.fromSvg(Constants.ICON)
-            ).apply {
-                register()
+                lyricProvider = LyriconFactory.createProvider(
+                    context = application,
+                    providerPackageName = Constants.PROVIDER_PACKAGE_NAME,
+                    playerPackageName = application.packageName,
+                    logo = ProviderLogo.fromSvg(Constants.ICON),
+                ).apply {
+                    register()
+                }
+
+                module.log(Log.INFO, TAG, "PiliPlus Provider registered")
+            } catch (t: Throwable) {
+                module.log(Log.ERROR, TAG, "Failed to register PiliPlus Provider", t)
             }
+        }
 
-            YLog.info(tag = TAG, msg = "PiliPlus Provider registered")
+        /**
+         * 兜底：若宿主在 Application.onCreate hook 前就开始播放，
+         * 通过 ActivityThread 反射获取 Application 以注册 Provider
+         */
+        private fun ensureProvider() {
+            if (lyricProvider != null) return
+            currentApplication()?.let { setupProvider(it) }
+        }
+
+        private fun currentApplication(): Application? {
+            return try {
+                val activityThreadClass = Class.forName("android.app.ActivityThread")
+                val currentActivityThread =
+                    activityThreadClass.getMethod("currentActivityThread").invoke(null) ?: return null
+                activityThreadClass.getMethod("getApplication").invoke(currentActivityThread) as? Application
+            } catch (_: Throwable) {
+                null
+            }
         }
 
         /**
@@ -98,36 +137,36 @@ object PiliPlusHook : YukiBaseHooker() {
          * - MediaMetadata.METADATA_KEY_MEDIA_ID = 唯一标识 (cid + herotag)
          * - MediaMetadata.METADATA_KEY_ART_URI = 视频封面
          */
-        fun hookMediaSession() {
-            "android.media.session.MediaSession".toClass()
-                .resolve()
-                .apply {
-                    // Hook setMetadata - 获取视频标题和UP主
-                    firstMethod {
-                        name = "setMetadata"
-                        parameters(MediaMetadata::class.java)
-                    }.hook {
-                        after {
-                            val metadata = args[0] as? MediaMetadata ?: return@after
-                            onMetadataChanged(metadata)
-                        }
-                    }
+        fun hookMediaSession(classLoader: ClassLoader) {
+            try {
+                val sessionClass = Class.forName("android.media.session.MediaSession", false, classLoader)
 
-                    // Hook setPlaybackState - 同步播放状态并启停已播放时间同步任务
-                    firstMethod {
-                        name = "setPlaybackState"
-                        parameters(PlaybackState::class.java)
-                    }.hook {
-                        after {
-                            val state = args[0] as? PlaybackState
-                            lastPlaybackState = state
-                            lyricProvider?.player?.setPlaybackState(state)
-                            updateElapsedTracking()
-                        }
-                    }
+                // Hook setMetadata - 获取视频标题和UP主
+                val setMetadata = sessionClass.getDeclaredMethod("setMetadata", MediaMetadata::class.java)
+                module.hook(setMetadata).intercept { chain ->
+                    chain.proceed()
+                    val metadata = chain.args.getOrNull(0) as? MediaMetadata
+                    if (metadata != null) onMetadataChanged(metadata)
+                    null
                 }
 
-            YLog.debug(tag = TAG, msg = "MediaSession hooks installed")
+                // Hook setPlaybackState - 同步播放状态并启停已播放时间同步任务
+                val setPlaybackState =
+                    sessionClass.getDeclaredMethod("setPlaybackState", PlaybackState::class.java)
+                module.hook(setPlaybackState).intercept { chain ->
+                    chain.proceed()
+                    val state = chain.args.getOrNull(0) as? PlaybackState
+                    lastPlaybackState = state
+                    ensureProvider()
+                    lyricProvider?.player?.setPlaybackState(state)
+                    updateElapsedTracking()
+                    null
+                }
+
+                module.log(Log.DEBUG, TAG, "MediaSession hooks installed")
+            } catch (t: Throwable) {
+                module.log(Log.ERROR, TAG, "Failed to install MediaSession hooks", t)
+            }
         }
 
         /**
@@ -147,9 +186,9 @@ object PiliPlusHook : YukiBaseHooker() {
             currentVideoId = videoId
             currentDuration = duration
 
-            YLog.info(
-                tag = TAG,
-                msg = "Video changed: title=$title, artist=$artist, duration=$duration"
+            module.log(
+                Log.INFO, TAG,
+                "Video changed: title=$title, artist=$artist, duration=$duration"
             )
 
             setSong(buildSong(title = title, artist = artist, duration = duration, videoId = videoId))
@@ -174,7 +213,7 @@ object PiliPlusHook : YukiBaseHooker() {
                 id = videoId,
                 name = if (pushTitle) title else null,
                 artist = if (pushArtist) artist else null,
-                duration = if (pushDuration) duration else 0L
+                duration = if (pushDuration) duration else 0L,
             )
         }
 

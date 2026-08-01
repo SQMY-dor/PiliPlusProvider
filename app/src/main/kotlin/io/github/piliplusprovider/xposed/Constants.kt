@@ -13,6 +13,16 @@ object Constants {
     /** PiliPlus dev版包名 */
     const val PILIPLUS_DEV_PACKAGE_NAME: String = "com.example.piliplus.dev"
 
+    /** 所有目标 PiliPlus 包名（与 META-INF/xposed/scope.list 一致） */
+    val TARGET_PACKAGES: Set<String> = setOf(
+        PILIPLUS_PACKAGE_NAME,
+        PILIPLUS_DEBUG_PACKAGE_NAME,
+        PILIPLUS_DEV_PACKAGE_NAME,
+    )
+
+    /** RemotePreferences 文件名（hook 侧与 UI 侧一致） */
+    const val PREFS_NAME: String = "settings"
+
     /** 模块图标 SVG (Bilibili TV icon) */
     const val ICON: String =
         "<svg viewBox=\"0 0 1024 1024\" xmlns=\"http://www.w3.org/2000/svg\" width=\"64\" height=\"64\">" +

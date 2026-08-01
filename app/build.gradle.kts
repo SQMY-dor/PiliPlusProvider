@@ -1,12 +1,11 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.ksp)
     alias(libs.plugins.compose)
 }
 
 android {
     namespace = "io.github.piliplusprovider"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.piliplusprovider"
@@ -36,6 +35,13 @@ android {
         buildConfig = true
         compose = true
     }
+
+    packaging {
+        resources {
+            merges += "META-INF/xposed/*"
+            excludes += "**"
+        }
+    }
 }
 
 kotlin {
@@ -47,11 +53,8 @@ kotlin {
 dependencies {
     implementation(libs.lyricon.provider)
 
-    implementation(libs.yukihookapi.api)
-    implementation(libs.kavaref.core)
-    implementation(libs.kavaref.extension)
-    compileOnly(libs.xposed.api)
-    ksp(libs.yukihookapi.ksp.xposed)
+    compileOnly(libs.libxposed.api)
+    implementation(libs.libxposed.service)
 
     implementation(libs.androidx.core.ktx)
 

@@ -1,6 +1,6 @@
 package io.github.piliplusprovider
 
-import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,8 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.libxposed.service.XposedService
 import io.github.piliplusprovider.xposed.Constants
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -26,30 +26,55 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 设置界面（Miuix / HyperOS 风格）
  *
- * 设置写入默认 SharedPreferences（文件名 `${applicationId}_preferences`），
- * 与 Manifest 中 xposedsharedprefs=true 的配置一致，Hook 端可跨进程读取。
+ * 设置通过 XposedService 读写 RemotePreferences（文件名 "settings"），
+ * Hook 侧在宿主进程内通过 getRemotePreferences("settings") 读取同一份数据。
+ * 未绑定框架（service == null）时界面显示默认值，绑定后自动刷新。
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), App.ServiceStateListener {
+
+    private var service by mutableStateOf<XposedService?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MiuixTheme {
-                SettingsScreen()
+                SettingsScreen(service = service)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        App.addServiceStateListener(this, true)
+    }
+
+    override fun onStop() {
+        App.removeServiceStateListener(this)
+        super.onStop()
+    }
+
+    override fun onServiceStateChanged(service: XposedService?) {
+        this.service = service
     }
 }
 
 @Composable
-private fun SettingsScreen() {
-    val context = LocalContext.current
-    val prefs = remember {
-        context.getSharedPreferences("${BuildConfig.APPLICATION_ID}_preferences", Context.MODE_PRIVATE)
+private fun SettingsScreen(service: XposedService?) {
+    val prefs = remember(service) {
+        runCatching { service?.getRemotePreferences(Constants.PREFS_NAME) }.getOrNull()
     }
-    var pushTitle by remember { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_TITLE, true)) }
-    var pushArtist by remember { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_ARTIST, true)) }
-    var pushDuration by remember { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_DURATION, true)) }
-    var showElapsedTime by remember { mutableStateOf(prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false)) }
+    var pushTitle by remember(service) { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_TITLE, true)) }
+    var pushArtist by remember(service) { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_ARTIST, true)) }
+    var pushDuration by remember(service) { mutableStateOf(prefs.getBoolean(Constants.KEY_PUSH_DURATION, true)) }
+    var showElapsedTime by remember(service) {
+        mutableStateOf(prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false))
+    }
+
+    fun writeBoolean(key: String, value: Boolean) {
+        runCatching {
+            prefs?.edit()?.putBoolean(key, value)?.apply()
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = "PiliPlus Provider") }
@@ -73,7 +98,7 @@ private fun SettingsScreen() {
                         checked = pushTitle,
                         onCheckedChange = {
                             pushTitle = it
-                            prefs.edit().putBoolean(Constants.KEY_PUSH_TITLE, it).apply()
+                            writeBoolean(Constants.KEY_PUSH_TITLE, it)
                         }
                     )
                     SuperSwitch(
@@ -82,7 +107,7 @@ private fun SettingsScreen() {
                         checked = pushArtist,
                         onCheckedChange = {
                             pushArtist = it
-                            prefs.edit().putBoolean(Constants.KEY_PUSH_ARTIST, it).apply()
+                            writeBoolean(Constants.KEY_PUSH_ARTIST, it)
                         }
                     )
                     SuperSwitch(
@@ -91,7 +116,7 @@ private fun SettingsScreen() {
                         checked = pushDuration,
                         onCheckedChange = {
                             pushDuration = it
-                            prefs.edit().putBoolean(Constants.KEY_PUSH_DURATION, it).apply()
+                            writeBoolean(Constants.KEY_PUSH_DURATION, it)
                         }
                     )
                 }
@@ -110,7 +135,7 @@ private fun SettingsScreen() {
                         checked = showElapsedTime,
                         onCheckedChange = {
                             showElapsedTime = it
-                            prefs.edit().putBoolean(Constants.KEY_SHOW_ELAPSED_TIME, it).apply()
+                            writeBoolean(Constants.KEY_SHOW_ELAPSED_TIME, it)
                         }
                     )
                 }
@@ -118,3 +143,6 @@ private fun SettingsScreen() {
         }
     }
 }
+
+private fun SharedPreferences?.getBoolean(key: String, defaultValue: Boolean): Boolean =
+    this?.getBoolean(key, defaultValue) ?: defaultValue
