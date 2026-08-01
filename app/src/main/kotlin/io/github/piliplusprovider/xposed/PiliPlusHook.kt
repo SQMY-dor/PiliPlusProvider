@@ -4,6 +4,7 @@ import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
 import com.highcapable.yukihookapi.hook.log.YLog
@@ -223,7 +224,8 @@ object PiliPlusHook : YukiBaseHooker() {
             val base = state.position.coerceAtLeast(0L)
             val speed = state.playbackSpeed
             if (state.state != PlaybackState.STATE_PLAYING || speed <= 0f) return base
-            val elapsedSinceUpdate = (System.currentTimeMillis() - state.lastPositionUpdateTime).coerceAtLeast(0L)
+            // lastPositionUpdateTime 基于 SystemClock.elapsedRealtime()（开机计时），不能用 currentTimeMillis 混算
+            val elapsedSinceUpdate = (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L)
             val estimated = base + (elapsedSinceUpdate * speed).toLong()
             return if (currentDuration > 0) estimated.coerceIn(0L, currentDuration) else estimated.coerceAtLeast(0L)
         }
