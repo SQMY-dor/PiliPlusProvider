@@ -23,6 +23,17 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 从仓库外读取签名密钥（/root/android-keys/），不存在则跳过签名
+            val keystoreFile = File("/root/android-keys/piliplus-release.keystore")
+            val passFile = File("/root/android-keys/keystore-pass.txt")
+            if (keystoreFile.exists() && passFile.exists()) {
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = keystoreFile
+                    storePassword = passFile.readText().trim()
+                    keyAlias = "piliplus"
+                    keyPassword = passFile.readText().trim()
+                }
+            }
         }
     }
 
