@@ -11,3 +11,6 @@
 .cxx
 local.properties
 gradle/gradle-daemon-jvm.properties
+
+# 工具/任务配置文件,不属于项目
+reasonix.toml

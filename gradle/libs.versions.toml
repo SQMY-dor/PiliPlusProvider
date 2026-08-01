@@ -8,9 +8,15 @@ kavaref-core = "1.0.2"
 kavaref-extension = "1.0.2"
 xposed = "82"
 provider = "0.1.70"
+composeBom = "2026.03.00"
+activityCompose = "1.13.0"
+miuix = "0.8.8"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+miuix = { module = "top.yukonga.miuix.kmp:miuix", version.ref = "miuix" }
 yukihookapi-api = { module = "com.highcapable.yukihookapi:api", version.ref = "yukihookapi" }
 yukihookapi-ksp-xposed = { module = "com.highcapable.yukihookapi:ksp-xposed", version.ref = "yukihookapi" }
 kavaref-core = { module = "com.highcapable.kavaref:kavaref-core", version.ref = "kavaref-core" }
@@ -22,3 +28,4 @@ lyricon-provider = { module = "io.github.proify.lyricon:provider", version.ref =
 android-application = { id = "com.android.application", version.ref = "agp" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

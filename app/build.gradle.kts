@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.compose)
 }
 
 android {
@@ -33,6 +34,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
     }
 }
 
@@ -52,4 +54,9 @@ dependencies {
     ksp(libs.yukihookapi.ksp.xposed)
 
     implementation(libs.androidx.core.ktx)
+
+    // Compose + Miuix (HyperOS 风格设置界面)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.miuix)
 }

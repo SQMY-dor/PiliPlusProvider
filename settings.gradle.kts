@@ -8,6 +8,10 @@ pluginManagement {
         google()
         gradlePluginPortal()
         maven { url = uri("https://api.xposed.info/") }
+        // 阿里云镜像(下载超时/失败时兜底)
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
     }
 }
 plugins {
@@ -22,6 +26,10 @@ dependencyResolutionManagement {
         maven { url = uri("https://jitpack.io") }
         google()
         maven { url = uri("https://api.xposed.info/") }
+        // 阿里云镜像(下载超时/失败时兜底)
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
     }
 }
 
