@@ -25,8 +25,11 @@ object UpdateChecker {
     /** 仓库 owner/name（GitHub Releases API 用） */
     const val REPO = "SQMY-dor/PiliPlusProvider"
 
-    /** 仓库主页（无 API 时的兜底跳转地址） */
-    const val REPO_URL = "https://github.com/SQMY-dor/PiliPlusProvider/releases/latest"
+    /** 仓库主页 */
+    const val REPO_URL = "https://github.com/$REPO"
+
+    /** 最新 Release 页面（无 APK 资源或 API 地址时的兜底） */
+    const val LATEST_RELEASE_URL = "$REPO_URL/releases/latest"
 
     private const val API_URL = "https://api.github.com/repos/$REPO/releases/latest"
 
@@ -40,12 +43,17 @@ object UpdateChecker {
         val publishedAt: String,         // 发布时间
     )
 
+    /** 明确区分“没有更新”和“检查失败”，避免网络失败时误报已是最新版。 */
+    sealed interface CheckResult {
+        data object UpToDate : CheckResult
+        data class UpdateAvailable(val info: UpdateInfo) : CheckResult
+        data class Failed(val message: String) : CheckResult
+    }
+
     /**
      * 检查是否有新版本（网络操作，需在 IO 线程调用）
-     *
-     * @return 有新版时返回 UpdateInfo，无新版/失败返回 null
      */
-    suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(): CheckResult = withContext(Dispatchers.IO) {
         try {
             val conn = URL(API_URL).openConnection() as HttpURLConnection
             try {
@@ -57,32 +65,40 @@ object UpdateChecker {
 
                 if (conn.responseCode != 200) {
                     Log.w(TAG, "GitHub API HTTP ${conn.responseCode}")
-                    return@withContext null
+                    return@withContext CheckResult.Failed(
+                        "检查更新失败（GitHub HTTP ${conn.responseCode}），请稍后重试"
+                    )
                 }
 
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
                 val tagName = json.optString("tag_name", "")
+                if (tagName.isBlank()) {
+                    Log.w(TAG, "GitHub release response has no tag_name")
+                    return@withContext CheckResult.Failed("检查更新失败：GitHub 未返回有效版本号")
+                }
                 val latestVersion = tagName.removePrefix("v")
                 // 版本比较：仅当远端版本 > 本地版本才提示
                 if (!isNewer(latestVersion, BuildConfig.VERSION_NAME)) {
                     Log.d(TAG, "Already latest: local=${BuildConfig.VERSION_NAME}, remote=$latestVersion")
-                    return@withContext null
+                    return@withContext CheckResult.UpToDate
                 }
-                UpdateInfo(
-                    latestVersion = latestVersion,
-                    tagName = tagName,
-                    releaseUrl = json.optString("html_url", REPO_URL),
-                    apkUrl = findApkUrl(json),
-                    body = json.optString("body", ""),
-                    publishedAt = json.optString("published_at", ""),
+                CheckResult.UpdateAvailable(
+                    UpdateInfo(
+                        latestVersion = latestVersion,
+                        tagName = tagName,
+                        releaseUrl = json.optString("html_url", LATEST_RELEASE_URL),
+                        apkUrl = findApkUrl(json),
+                        body = json.optString("body", ""),
+                        publishedAt = json.optString("published_at", ""),
+                    )
                 )
             } finally {
                 conn.disconnect()
             }
         } catch (e: Exception) {
             Log.w(TAG, "Update check failed: ${e.message}")
-            null
+            CheckResult.Failed("检查更新失败，请检查网络后重试")
         }
     }
 
@@ -91,7 +107,7 @@ object UpdateChecker {
      * 优先找 release 版（名称含 "-release.apk"），没有则回退任意 .apk
      */
     private fun findApkUrl(json: JSONObject): String {
-        val assets = json.optJSONArray("assets") ?: return REPO_URL
+        val assets = json.optJSONArray("assets") ?: return LATEST_RELEASE_URL
         var fallback = ""
         for (i in 0 until assets.length()) {
             val asset = assets.optJSONObject(i) ?: continue
@@ -102,7 +118,7 @@ object UpdateChecker {
             if (name.contains("-release.apk") || name.contains("release")) return url
             if (fallback.isBlank()) fallback = url
         }
-        return fallback.ifBlank { REPO_URL }
+        return fallback.ifBlank { LATEST_RELEASE_URL }
     }
 
     /**
@@ -151,14 +167,27 @@ object UpdateChecker {
         }
     }
 
-    /** 打开浏览器跳转 Release 页（兜底） */
-    fun openReleasePage(context: Context, url: String = REPO_URL) {
-        try {
+    /** 打开仓库主页。 */
+    fun openRepositoryPage(context: Context): Boolean = openWebPage(context, REPO_URL)
+
+    /** 打开浏览器跳转 Release 页（兜底）。 */
+    fun openReleasePage(context: Context, url: String = LATEST_RELEASE_URL): Boolean =
+        openWebPage(context, url)
+
+    private fun openWebPage(context: Context, url: String): Boolean {
+        val uri = Uri.parse(url)
+        if (uri.scheme != "https") {
+            Log.e(TAG, "Refusing to open non-HTTPS URL: $url")
+            return false
+        }
+        return try {
             context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "openReleasePage failed: ${e.message}")
+            Log.e(TAG, "openWebPage failed: ${e.message}")
+            false
         }
     }
 }
