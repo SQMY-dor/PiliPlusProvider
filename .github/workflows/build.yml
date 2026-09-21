@@ -41,8 +41,13 @@ jobs:
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
 
+      # ubuntu-latest 自带 Android SDK 与 cmdline-tools；
+      # 接受许可并确认 platform/build-tools 就绪即可
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          echo "Android SDK: $ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" 2>/dev/null || true
 
       # ---------- 签名密钥：全部从 Secrets 注入 ----------
       # tag 构建强制要求 4 个 Secrets 齐备；分支构建缺 Secrets 时跳过注入，
