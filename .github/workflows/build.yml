@@ -2,10 +2,9 @@ name: Build & Release
 
 on:
   # master 每次 push：编译验证（debug + release，不上传产物）
-  push:
-    branches: [master]
   # push tag v*：编译 + 校验签名密钥与版本一致性 + 创建 Release 并上传 APK
   push:
+    branches: [master]
     tags: ['v*']
 
 permissions:
