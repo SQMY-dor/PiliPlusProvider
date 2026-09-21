@@ -74,6 +74,9 @@ kotlin {
 dependencies {
     implementation(libs.lyricon.provider)
 
+    // 星河岛（AstraIsland）接入库 —— 本地 AAR，SHA256 见 README
+    implementation(files("libs/astraisland-client.aar"))
+
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
 

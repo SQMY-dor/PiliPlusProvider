@@ -3,6 +3,7 @@ package io.github.piliplusprovider
 import android.app.Application
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
+import io.github.piliplusprovider.island.IslandPublisher
 import java.util.concurrent.CopyOnWriteArraySet
 import kotlin.concurrent.Volatile
 
@@ -48,6 +49,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     override fun onCreate() {
         super.onCreate()
         XposedServiceHelper.registerListener(this)
+        // 建立与星河岛（AstraIsland）的连接。
+        // 必须由模块进程投送：星河岛按调用方 uid 核对来源包名，而 Hook 跑在
+        // PiliPlus 进程（uid 属于 PiliPlus，其清单未声明星河岛权限）。
+        IslandPublisher.attach(this)
     }
 
     interface ServiceStateListener {

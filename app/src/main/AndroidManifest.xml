@@ -9,6 +9,23 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!--
+      星河岛（AstraIsland）接入权限。
+      该权限由星河岛安装包定义（protectionLevel=normal，不弹授权框），
+      声明后即可向其投送内容。注意来源身份按「调用方 uid」核对，因此投送
+      必须发生在本模块进程（见 IslandPublisher 注释）。
+    -->
+    <uses-permission android:name="com.astraisland.permission.PUBLISH_ACTIVITY" />
+
+    <!--
+      包可见性声明（Android 11+）。
+      IslandClient.connect() 用 PackageManager 检查 com.astraisland 是否安装，
+      未声明则查不到该包、状态会误停在 NOT_INSTALLED。
+    -->
+    <queries>
+        <package android:name="com.astraisland" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="true"
@@ -26,6 +43,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Hook → 模块进程的跨进程桥。
+          必须 exported=true 才能接收另一个应用（PiliPlus 进程）发来的广播；
+          接收器内部用共享令牌做轻量防伪（见 Constants.BRIDGE_TOKEN）。
+          不用 ContentProvider 是因为 Android 11+ 包可见性会过滤跨应用 provider
+          访问，而调用方 PiliPlus 是第三方 App，清单不可改。
+        -->
+        <receiver
+            android:name=".island.IslandReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="io.github.piliplusprovider.action.ISLAND_UPDATE" />
+                <action android:name="io.github.piliplusprovider.action.ISLAND_CLEAR" />
+            </intent-filter>
+        </receiver>
 
         <meta-data
             android:name="lyricon_module"

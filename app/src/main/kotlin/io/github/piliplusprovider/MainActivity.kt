@@ -270,6 +270,12 @@ private fun SettingsScreen(
     var showElapsedTime by remember(service) {
         mutableStateOf(prefs.getBoolean(Constants.KEY_SHOW_ELAPSED_TIME, false))
     }
+    var enableIsland by remember(service) {
+        mutableStateOf(prefs.getBoolean(Constants.KEY_ENABLE_ISLAND, false))
+    }
+    var islandPushCover by remember(service) {
+        mutableStateOf(prefs.getBoolean(Constants.KEY_ISLAND_PUSH_COVER, true))
+    }
 
     fun writeBoolean(key: String, value: Boolean) {
         runCatching {
@@ -426,6 +432,34 @@ private fun SettingsScreen(
                         onCheckedChange = {
                             showElapsedTime = it
                             writeBoolean(Constants.KEY_SHOW_ELAPSED_TIME, it)
+                        }
+                    )
+                }
+            }
+            item {
+                SmallTitle(
+                    text = "星河岛",
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+            item {
+                Card(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    SuperSwitch(
+                        title = "推送到星河岛",
+                        summary = "把当前视频信息显示到星河岛（需安装星河岛 1.0+ 并启用其模块）",
+                        checked = enableIsland,
+                        onCheckedChange = {
+                            enableIsland = it
+                            writeBoolean(Constants.KEY_ENABLE_ISLAND, it)
+                        }
+                    )
+                    SuperSwitch(
+                        title = "推送视频封面",
+                        summary = "在星河岛显示视频封面（关闭后使用内置图标）",
+                        checked = islandPushCover,
+                        onCheckedChange = {
+                            islandPushCover = it
+                            writeBoolean(Constants.KEY_ISLAND_PUSH_COVER, it)
                         }
                     )
                 }
