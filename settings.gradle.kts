@@ -2,6 +2,10 @@
 
 pluginManagement {
     repositories {
+        // 阿里云镜像优先（dl.google.com 直连被 TLS 重置）
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         mavenLocal()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
@@ -21,15 +25,15 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 阿里云镜像优先（dl.google.com 直连被 TLS 重置）
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         mavenLocal()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
         google()
         maven { url = uri("https://api.xposed.info/") }
-        // 阿里云镜像(下载超时/失败时兜底)
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
     }
 }
 

@@ -123,24 +123,47 @@ object UpdateChecker {
 
     /**
      * 语义化版本比较：remote > local 返回 true
-     * 支持 1.2.3 或 v1.2.3 格式；无法解析时按字符串比较
+     *
+     * 规则：
+     * - 逐段数值比较，段数不同时短的一方按 0 补齐（修复 1.2.0.1 vs 1.2.0 被判为「无更新」）
+     * - 数值完全相同时，正式版 > 预发布版（修复 1.2.0-beta 被判为比 1.2.0 新）
+     * - 无法解析（非 `数字[.数字...][-预发布]` 形态）时回退字符串比较
      */
     private fun isNewer(remote: String, local: String): Boolean {
         val r = parseVersion(remote)
         val l = parseVersion(local)
         if (r == null || l == null) return remote.compareTo(local) > 0
+
+        val segments = maxOf(r.numeric.size, l.numeric.size)
+        for (i in 0 until segments) {
+            val a = r.numeric.getOrElse(i) { 0 }
+            val b = l.numeric.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+
+        val rPre = r.preRelease
+        val lPre = l.preRelease
         return when {
-            r[0] != l[0] -> r[0] > l[0]
-            r.size > 1 && l.size > 1 && r[1] != l[1] -> r[1] > l[1]
-            r.size > 2 && l.size > 2 && r[2] != l[2] -> r[2] > l[2]
-            else -> false
+            rPre == null && lPre == null -> false
+            rPre == null -> true          // 远端正式版 > 本地预发布版
+            lPre == null -> false         // 远端预发布版 < 本地正式版
+            else -> rPre > lPre           // 同为预发布：按标识符字典序
         }
     }
 
-    private fun parseVersion(v: String): List<Int>? {
-        val clean = v.trim().removePrefix("v")
-        val parts = clean.split(".")
-        return parts.mapNotNull { it.toIntOrNull() }.takeIf { it.isNotEmpty() && it.size == parts.size }
+    /** 解析结果：数值段 + 可选的预发布标识符（`-` 或 `+` 之后的部分） */
+    private data class Version(val numeric: List<Int>, val preRelease: String?)
+
+    private fun parseVersion(v: String): Version? {
+        val clean = v.trim().removePrefix("v").removePrefix("V")
+        if (clean.isEmpty()) return null
+        val cut = clean.indexOfFirst { it == '-' || it == '+' }
+        val core = if (cut >= 0) clean.substring(0, cut) else clean
+        val pre = if (cut >= 0) clean.substring(cut + 1).takeIf { it.isNotEmpty() } else null
+        val parts = core.split(".")
+        val numeric = parts.map { it.toIntOrNull() ?: return null }
+        if (numeric.isEmpty()) return null
+        return Version(numeric, pre)
     }
 
     /**
