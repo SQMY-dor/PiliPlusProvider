@@ -1,0 +1,138 @@
+name: Build & Release
+
+on:
+  # master 每次 push：编译验证（debug + release，不上传产物）
+  push:
+    branches: [master]
+  # push tag v*：编译 + 校验签名密钥与版本一致性 + 创建 Release 并上传 APK
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 创建 Release 与上传资产需要
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build APK (JDK 21)
+    runs-on: ubuntu-latest
+    env:
+      # Secrets 名称清单（缺失时 tag 发布会在前置校验被拦下）
+      KEYSTORE_BASE64:   ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 生成 release notes 需要完整 tag 历史
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ---------- 签名密钥：全部从 Secrets 注入 ----------
+      # tag 构建强制要求 4 个 Secrets 齐备；分支构建缺 Secrets 时跳过注入，
+      # release 产物为 unsigned（仅作编译验证，不发布）。
+      - name: Verify signing secrets (required for tag builds)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          missing=0
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "::error::缺少 Secret: $v"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || { echo "::error::请到仓库 Settings → Secrets and variables → Actions 配置 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD（见 README「CI 签名」一节）"; exit 1; }
+          echo "signing secrets: OK"
+
+      - name: Inject signing keystore
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/prod.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/prod.keystore" >> "$GITHUB_ENV"
+
+      - name: Show version
+        run: |
+          echo "versionName=$(grep versionName version.properties | cut -d= -f2)"
+          echo "versionCode=$(grep versionCode version.properties | cut -d= -f2)"
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleRelease --stacktrace
+
+      - name: Verify APK signature
+        if: env.KEYSTORE_FILE != ''
+        run: |
+          for apk in app/build/outputs/apk/release/*.apk; do
+            echo "== $apk =="
+            APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            "$APKSIGNER" verify --print-certs "$apk" | head -6
+          done
+
+      # ---------- 以下仅在 tag 触发时执行 ----------
+      - name: Check tag matches version.properties
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"          # 如 v1.1.7
+          VERSION=$(grep versionName version.properties | cut -d= -f2 | tr -d ' \r')
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag $TAG 与 version.properties 的 versionName $VERSION 不一致；请先 ./gradlew bumpVersion -PnewVersion=$VERSION 再打 tag"
+            exit 1
+          fi
+          echo "TAG_VERSION=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Rename APKs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/PiliPlusProvider-v${VERSION}-release.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk    "dist/PiliPlusProvider-v${VERSION}-debug.apk"
+          ls -la dist/
+
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | grep -A1 "^${TAG_VERSION}$" | tail -1)
+          {
+            echo "## PiliPlusProvider v${VERSION}"
+            echo
+            echo "### 变更"
+            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG_VERSION" ]; then
+              git log --oneline --no-merges "${PREV_TAG}..${TAG_VERSION}" | sed 's/^/ - /'
+            else
+              git log --oneline -10 | sed 's/^/ - /'
+            fi
+            echo
+            echo "---"
+            echo "- \`*-release.apk\`：R8 优化 + 正式密钥签名，推荐安装"
+            echo "- \`*-debug.apk\`：调试构建，体积较大"
+          } > release_notes.md
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PiliPlusProvider ${{ env.TAG_VERSION }}
+          body_path: release_notes.md
+          files: dist/*.apk
+          generate_release_notes: false
+          fail_on_unmatched_files: true

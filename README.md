@@ -104,6 +104,44 @@ PiliPlus 清单不可改；显式广播由 system_server 解析组件投递，�
 
 输出路径：`app/build/outputs/apk/debug/`
 
+## CI 自动构建与发布（GitHub Actions）
+
+仓库带有一个开箱即用的 workflow（`.github/workflows/build.yml`）：
+
+- **push 到 `master`**：自动编译 debug + release 验证，不上传产物
+- **push tag `v*`**（如 `v1.1.7`）：自动编译 + 用正式密钥签名 + 创建 GitHub Release 并上传
+  `PiliPlusProvider-v<版本>-release.apk` 与 `debug.apk`
+
+tag 必须与 `version.properties` 的 `versionName` 一致，否则发布会直接失败：
+
+```bash
+./gradlew bumpVersion -PnewVersion=1.1.7   # versionCode +1 并写入新版本号
+git add version.properties && git commit -m "chore: bump 1.1.7"
+git tag v1.1.7 && git push origin master v1.1.7
+```
+
+### CI 签名密钥（必需配置一次）
+
+CI 的 release 签名密钥从 GitHub Secrets 注入，**仓库内不保存任何密钥材料**。
+到仓库 **Settings → Secrets and variables → Actions → New repository secret**，
+添加以下 4 个：
+
+| Secret 名 | 值 |
+|---|---|
+| `KEYSTORE_BASE64` | keystore 文件的 base64（见下方命令） |
+| `KEYSTORE_PASSWORD` | keystore 口令 |
+| `KEY_ALIAS` | 密钥别名（本项目为 `piliplus`） |
+| `KEY_PASSWORD` | 密钥口令 |
+
+在本机生成 `KEYSTORE_BASE64` 的值（一整行，直接粘贴进 Secret）：
+
+```bash
+base64 -w0 piliplus-release.keystore
+```
+
+未配置 Secrets 时：master 分支构建仍可编译（release 产物为 unsigned，仅验证）；
+tag 构建会在「Verify signing secrets」一步直接失败，防止发出未签名包。
+
 ## 参考
 
 - [LyricProvider](https://github.com/tomakino/LyricProvider) - 歌词提供器插件架构参考

@@ -13,6 +13,46 @@ val versionProps = Properties().apply {
 val appVersionCode: Int = (versionProps.getProperty("versionCode") ?: "1").toInt()
 val appVersionName: String = versionProps.getProperty("versionName") ?: "1.0.0"
 
+// ===== Release 签名解析（优先级：环境变量 > 本机正式密钥；均缺失则 unsigned） =====
+//
+// 环境变量由 GitHub Actions 注入（仓库 Settings → Secrets and variables → Actions）：
+//   KEYSTORE_FILE        解码后的 keystore 临时文件路径（workflow 内部处理）
+//   KEYSTORE_PASSWORD    keystore 口令
+//   KEY_ALIAS            密钥别名
+//   KEY_PASSWORD         密钥口令
+// 本机正式密钥：/root/android-keys/（本地发布用，不入库）。
+// 任一来源缺失时 release 构建为 unsigned——CI 的 tag 发布流程会在前置步骤
+// 显式校验 Secrets 齐备，避免发出未签名/错签名包。
+data class SigningChoice(
+    val storeFile: File,
+    val storePassword: String,
+    val keyAlias: String,
+    val keyPassword: String,
+)
+
+fun resolveReleaseSigning(): SigningChoice? {
+    val envStore = System.getenv("KEYSTORE_FILE")
+    if (envStore != null && File(envStore).exists()) {
+        val pass = System.getenv("KEYSTORE_PASSWORD") ?: ""
+        logger.lifecycle("release signing: keystore from environment")
+        return SigningChoice(
+            storeFile = File(envStore),
+            storePassword = pass,
+            keyAlias = System.getenv("KEY_ALIAS") ?: "",
+            keyPassword = System.getenv("KEY_PASSWORD") ?: pass,
+        )
+    }
+    val localKey = File("/root/android-keys/piliplus-release.keystore")
+    val localPass = File("/root/android-keys/keystore-pass.txt")
+    if (localKey.exists() && localPass.exists()) {
+        val pass = localPass.readText().trim()
+        logger.lifecycle("release signing: local production keystore")
+        return SigningChoice(localKey, pass, "piliplus", pass)
+    }
+    logger.lifecycle("release signing: no keystore available, release will be unsigned")
+    return null
+}
+
 android {
     namespace = "io.github.piliplusprovider"
     compileSdk = 37
@@ -33,15 +73,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 从仓库外读取签名密钥（/root/android-keys/），不存在则跳过签名
-            val keystoreFile = File("/root/android-keys/piliplus-release.keystore")
-            val passFile = File("/root/android-keys/keystore-pass.txt")
-            if (keystoreFile.exists() && passFile.exists()) {
+            resolveReleaseSigning()?.let { choice ->
                 signingConfig = signingConfigs.create("release") {
-                    storeFile = keystoreFile
-                    storePassword = passFile.readText().trim()
-                    keyAlias = "piliplus"
-                    keyPassword = passFile.readText().trim()
+                    storeFile = choice.storeFile
+                    storePassword = choice.storePassword
+                    keyAlias = choice.keyAlias
+                    keyPassword = choice.keyPassword
                 }
             }
         }
