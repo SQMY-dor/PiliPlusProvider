@@ -5,7 +5,7 @@
 - [Lyricon](https://github.com/tomakino/LyricProvider) Provider 接口（词幕等）
 - [星河岛 AstraIsland](https://github.com/MuYuanXing/AstraIsland-Developers) 接入库（岛胶囊 / 展开卡片）
 
-> 本项目由 Qwen 3.8 Max Preview 生成构建。
+> 本项目由 Qwen 3.8 Max Preview  Deepseek V4.1 Flash 生成构建。
 
 ## 功能
 
